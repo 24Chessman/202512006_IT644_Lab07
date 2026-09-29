@@ -1,0 +1,30 @@
+# -----------------------------------------------------------------------
+# .dockerignore — api-gateway (Lab 07)
+# -----------------------------------------------------------------------
+
+# Node dependencies — reinstalled inside the image via npm install
+node_modules/
+npm-debug.log*
+
+# Environment secrets — injected at runtime via env vars or Compose
+.env
+.env.*
+
+# Version control metadata
+.git/
+.gitignore
+
+# Editor / IDE settings
+.vscode/
+.idea/
+
+# OS artefacts
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Test output / coverage
+coverage/

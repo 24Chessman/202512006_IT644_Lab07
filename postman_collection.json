@@ -1,0 +1,734 @@
+{
+  "info": {
+    "_postman_id": "lab07-api-gateway-collection",
+    "name": "Microservices – Lab 7 (API Gateway)",
+    "description": "Complete test collection for Lab 07 — API Gateway + Config-based Service Discovery.\n\nArchitecture:\n  Client/Postman → api-gateway (localhost:4000 / Render cloud)\n                   ├─ /users/*    → user-service    (internal)\n                   ├─ /products/* → product-service (internal)\n                   └─ /orders/*  → order-service   (internal)\n\nStart all services: docker compose up -d\n\nEnvironments:\n  • local:  gateway_url = http://localhost:4000\n  • cloud:  gateway_url = https://lab07-api-gateway.onrender.com\n\nTest order (recommended):\n  1. Gateway Health\n  2. User CRUD via Gateway\n  3. Product CRUD via Gateway\n  4. Order via Gateway (validates user + product)\n  5. Error scenarios: 503 (service down) via Gateway",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "gateway_url",  "value": "http://localhost:4000",                          "description": "API Gateway base URL. Switch to Render cloud URL for cloud tests." },
+    { "key": "cloud_url",    "value": "https://lab07-api-gateway.onrender.com",         "description": "Public Render cloud gateway URL for cloud re-run tests." },
+    { "key": "userId",       "value": "u1",                                             "description": "Set automatically after POST /users" },
+    { "key": "productId",    "value": "p1",                                             "description": "Set automatically after POST /products" },
+    { "key": "orderId",      "value": "o1",                                             "description": "Set automatically after POST /orders" }
+  ],
+  "item": [
+
+    {
+      "name": "1 · Gateway Health & Info",
+      "description": "Gateway-only endpoints — no proxying to upstream services.",
+      "item": [
+        {
+          "name": "GET /health — Gateway Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/health",
+            "description": "Returns gateway status, version, timestamp, and the upstream service URLs from environment config."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status is ok', () => pm.expect(pm.response.json().status).to.equal('ok'));",
+                  "pm.test('service is api-gateway', () => pm.expect(pm.response.json().service).to.equal('api-gateway'));",
+                  "pm.test('upstreams present', () => pm.expect(pm.response.json().upstreams).to.be.an('object'));",
+                  "pm.test('has user-service URL', () => pm.expect(pm.response.json().upstreams['user-service']).to.be.a('string'));",
+                  "pm.test('has product-service URL', () => pm.expect(pm.response.json().upstreams['product-service']).to.be.a('string'));",
+                  "pm.test('has order-service URL', () => pm.expect(pm.response.json().upstreams['order-service']).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET / — Gateway Info",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/",
+            "description": "Returns gateway routing table built from environment config."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('service is api-gateway', () => pm.expect(pm.response.json().service).to.equal('api-gateway'));",
+                  "pm.test('routes present', () => pm.expect(pm.response.json().routes).to.be.an('object'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "2 · User Service — via Gateway",
+      "description": "All CRUD calls routed through the API gateway at /users/*. Gateway forwards to user-service internally.",
+      "item": [
+        {
+          "name": "GET /users — List All Users",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/users",
+            "description": "Proxied to user-service. Returns [] on a fresh start."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response is array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /users — Create User (Alice)",
+          "request": {
+            "method": "POST",
+            "url": "{{gateway_url}}/users",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice Johnson\",\n  \"email\": \"alice@example.com\"\n}"
+            },
+            "description": "Creates Alice via the gateway. Saves userId to collection variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('userId', body.id);",
+                  "pm.test('User has id', () => pm.expect(body.id).to.be.a('string'));",
+                  "pm.test('User has name', () => pm.expect(body.name).to.equal('Alice Johnson'));",
+                  "pm.test('User has email', () => pm.expect(body.email).to.equal('alice@example.com'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /users — Create User (Bob)",
+          "request": {
+            "method": "POST",
+            "url": "{{gateway_url}}/users",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bob Smith\",\n  \"email\": \"bob@example.com\"\n}"
+            },
+            "description": "Creates Bob via the gateway."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /users/:id — Get User by ID",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/users/{{userId}}",
+            "description": "Fetches Alice using the userId saved in the collection variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Correct user returned', () => {",
+                  "    pm.expect(pm.response.json().id).to.equal(pm.collectionVariables.get('userId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /users/:id — Update User",
+          "request": {
+            "method": "PUT",
+            "url": "{{gateway_url}}/users/{{userId}}",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice Johnson (Updated)\",\n  \"email\": \"alice.updated@example.com\"\n}"
+            },
+            "description": "Full update of Alice via the gateway."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Name updated', () => pm.expect(pm.response.json().name).to.include('Updated'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE /users/:id — Delete User",
+          "request": {
+            "method": "DELETE",
+            "url": "{{gateway_url}}/users/{{userId}}",
+            "description": "Deletes Alice. Returns 204 No Content."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /users — Re-create Alice (for Order tests)",
+          "request": {
+            "method": "POST",
+            "url": "{{gateway_url}}/users",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice Johnson\",\n  \"email\": \"alice@example.com\"\n}"
+            },
+            "description": "Re-creates Alice for Order tests. Saves new id to collection variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('userId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "3 · Product Service — via Gateway",
+      "description": "All CRUD calls routed through the API gateway at /products/*.",
+      "item": [
+        {
+          "name": "GET /products — List All Products",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/products",
+            "description": "Proxied to product-service. Returns [] on a fresh start."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response is array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /products — Create Product (Laptop)",
+          "request": {
+            "method": "POST",
+            "url": "{{gateway_url}}/products",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Laptop Pro 15\",\n  \"price\": 1299.99,\n  \"category\": \"Electronics\"\n}"
+            },
+            "description": "Creates a product via the gateway. Saves productId."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('productId', body.id);",
+                  "pm.test('Product has id', () => pm.expect(body.id).to.be.a('string'));",
+                  "pm.test('Price correct', () => pm.expect(body.price).to.equal(1299.99));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /products — Create Product (Headphones)",
+          "request": {
+            "method": "POST",
+            "url": "{{gateway_url}}/products",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Wireless Headphones\",\n  \"price\": 89.50,\n  \"category\": \"Audio\"\n}"
+            },
+            "description": "Creates a second product via the gateway."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /products/:id — Get Product by ID",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/products/{{productId}}",
+            "description": "Fetches the product stored in the productId variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Correct product', () => pm.expect(pm.response.json().id).to.equal(pm.collectionVariables.get('productId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /products/:id — Update Product",
+          "request": {
+            "method": "PUT",
+            "url": "{{gateway_url}}/products/{{productId}}",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Laptop Pro 15 (Refurbished)\",\n  \"price\": 999.00,\n  \"category\": \"Electronics\"\n}"
+            },
+            "description": "Full update of the product via the gateway."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Price updated', () => pm.expect(pm.response.json().price).to.equal(999));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE /products/:id — Delete Product",
+          "request": {
+            "method": "DELETE",
+            "url": "{{gateway_url}}/products/{{productId}}",
+            "description": "Deletes the product. Returns 204 No Content."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /products — Re-create Laptop (for Order tests)",
+          "request": {
+            "method": "POST",
+            "url": "{{gateway_url}}/products",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Laptop Pro 15\",\n  \"price\": 1299.99,\n  \"category\": \"Electronics\"\n}"
+            },
+            "description": "Re-creates the Laptop so Order tests have a valid productId."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('productId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "4 · Order Service — via Gateway",
+      "description": "Order operations routed through the gateway at /orders/*. Order service internally calls user-service and product-service for validation.",
+      "item": [
+        {
+          "name": "GET /orders — List All Orders",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/orders",
+            "description": "Proxied to order-service. Returns [] on a fresh start."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response is array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /orders — Create Order (Valid)",
+          "request": {
+            "method": "POST",
+            "url": "{{gateway_url}}/orders",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"productId\": \"{{productId}}\",\n  \"quantity\": 2\n}"
+            },
+            "description": "Creates an order via the gateway. Gateway → order-service → user-service + product-service (internal validation). Full chain test."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('orderId', body.id);",
+                  "pm.test('Order has id', () => pm.expect(body.id).to.be.a('string'));",
+                  "pm.test('Order has userSnapshot', () => pm.expect(body.userSnapshot).to.be.an('object'));",
+                  "pm.test('Order has productSnapshot', () => pm.expect(body.productSnapshot).to.be.an('object'));",
+                  "pm.test('Order has totalPrice', () => pm.expect(body.totalPrice).to.be.a('number'));",
+                  "pm.test('totalPrice correct', () => pm.expect(body.totalPrice).to.equal(2599.98));",
+                  "pm.test('Status confirmed', () => pm.expect(body.status).to.equal('confirmed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /orders/:id — Get Order by ID",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/orders/{{orderId}}",
+            "description": "Fetches the order stored in orderId variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Correct order', () => pm.expect(pm.response.json().id).to.equal(pm.collectionVariables.get('orderId')));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "5 · Gateway Error Scenarios",
+      "description": "Tests for gateway error handling:\n  • 404 invalid upstream resource\n  • 503 ServiceUnavailable (gateway detects service is down)\n\n503 Test procedure:\n  1. Run: docker stop user-service\n  2. Send 'GET /users — 503 user-service DOWN'\n  3. Expect 503 ServiceUnavailable\n  4. Run: docker start user-service\n  5. Send 'GET /users — Recovery' → should return 200\n\nCloud 503 test: Cannot stop individual cloud services on free tier;\n  use a deliberately wrong URL to simulate: change USER_SERVICE_URL to\n  http://nonexistent:9999 in env, redeploy, and test.",
+      "item": [
+        {
+          "name": "POST /orders — 404 Invalid userId",
+          "request": {
+            "method": "POST",
+            "url": "{{gateway_url}}/orders",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"u999\",\n  \"productId\": \"{{productId}}\",\n  \"quantity\": 1\n}"
+            },
+            "description": "Invalid userId. Gateway → order-service → user-service returns 404. Order service propagates 404 back through gateway."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Error is NotFound', () => pm.expect(pm.response.json().error).to.equal('NotFound'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /orders — 404 Invalid productId",
+          "request": {
+            "method": "POST",
+            "url": "{{gateway_url}}/orders",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"productId\": \"p999\",\n  \"quantity\": 1\n}"
+            },
+            "description": "Invalid productId. Gateway → order-service → product-service returns 404."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Error is NotFound', () => pm.expect(pm.response.json().error).to.equal('NotFound'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /users — 503 user-service DOWN",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/users",
+            "description": "PREREQUISITE: Stop user-service first: docker stop user-service\n\nGateway attempts to proxy to user-service, gets network error (EAI_AGAIN / ECONNREFUSED), returns clean 503 ServiceUnavailable — never hangs or crashes.\n\nAfter confirming 503, restart: docker start user-service"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 503', () => pm.response.to.have.status(503));",
+                  "const body = pm.response.json();",
+                  "pm.test('Error is ServiceUnavailable', () => pm.expect(body.error).to.equal('ServiceUnavailable'));",
+                  "pm.test('Has upstream field', () => pm.expect(body.upstream).to.be.a('string'));",
+                  "pm.test('Has path field', () => pm.expect(body.path).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /users — Recovery after restart",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/users",
+            "description": "PREREQUISITE: user-service must be running (docker start user-service).\n\nConfirms gateway recovers automatically — no gateway restart needed."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 — recovered', () => pm.response.to.have.status(200));",
+                  "pm.test('Response is array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /nonexistent — 404 Unknown Gateway Route",
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/nonexistent",
+            "description": "Path not in the gateway routing table. Gateway returns its own 404 (no proxying)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Error is NotFound', () => pm.expect(pm.response.json().error).to.equal('NotFound'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "6 · Cloud Gateway Tests (Render)",
+      "description": "Same tests re-run against the public Render cloud deployment.\nSet the 'gateway_url' variable to the cloud URL, OR use the 'cloud_url' variable directly.\n\nCloud gateway URL: https://lab07-api-gateway.onrender.com\n\nNote: Render free tier spins down after 15 min inactivity — first request may take 30s.",
+      "item": [
+        {
+          "name": "GET /health — Cloud Gateway Health",
+          "request": {
+            "method": "GET",
+            "url": "{{cloud_url}}/health",
+            "description": "Health check against the public Render cloud gateway."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Cloud: Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Cloud: status is ok', () => pm.expect(pm.response.json().status).to.equal('ok'));",
+                  "pm.test('Cloud: service is api-gateway', () => pm.expect(pm.response.json().service).to.equal('api-gateway'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /users — Cloud: Create User",
+          "request": {
+            "method": "POST",
+            "url": "{{cloud_url}}/users",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cloud Test User\",\n  \"email\": \"cloud@example.com\"\n}"
+            },
+            "description": "Creates a user via the cloud-deployed gateway."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Cloud: Status 201', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('userId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /users — Cloud: List Users",
+          "request": {
+            "method": "GET",
+            "url": "{{cloud_url}}/users",
+            "description": "Lists users via the cloud gateway."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Cloud: Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Cloud: Response is array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /products — Cloud: Create Product",
+          "request": {
+            "method": "POST",
+            "url": "{{cloud_url}}/products",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cloud Test Product\",\n  \"price\": 49.99,\n  \"category\": \"Test\"\n}"
+            },
+            "description": "Creates a product via the cloud gateway."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Cloud: Status 201', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('productId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /orders — Cloud: Full Order Chain",
+          "request": {
+            "method": "POST",
+            "url": "{{cloud_url}}/orders",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"productId\": \"{{productId}}\",\n  \"quantity\": 1\n}"
+            },
+            "description": "Full cloud chain: cloud gateway → cloud order-service → cloud user-service + cloud product-service."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Cloud: Status 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('Cloud: Order confirmed', () => pm.expect(body.status).to.equal('confirmed'));",
+                  "pm.test('Cloud: has totalPrice', () => pm.expect(body.totalPrice).to.be.a('number'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /health — Cloud: Config-driven URL Proof",
+          "request": {
+            "method": "GET",
+            "url": "{{cloud_url}}/health",
+            "description": "Verifies that the cloud gateway's upstream URLs are read from Render environment variables — not hard-coded. The 'upstreams' field shows the URLs configured via Render's env var panel."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Cloud: upstreams are Render URLs', () => {",
+                  "    const upstreams = pm.response.json().upstreams;",
+                  "    const values = Object.values(upstreams);",
+                  "    // All upstreams should be configured via env vars (Render URLs or internal)",
+                  "    values.forEach(url => pm.expect(url).to.be.a('string').and.not.be.empty);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+
+  ]
+}

@@ -1,0 +1,82 @@
+# -----------------------------------------------------------------------
+# render.yaml — Lab 07: Cloud Deployment on Render
+#
+# Deploys all four services as individual Render Web Services.
+# The api-gateway is the only public-facing service.
+# user-service, product-service, and order-service are deployed as
+# internal services (reachable by gateway via Render internal URLs).
+#
+# Deploy steps:
+#   1. Push this repo to GitHub
+#   2. Go to https://dashboard.render.com → New Blueprint
+#   3. Select the repo → Render detects this render.yaml
+#   4. Confirm and deploy
+#
+# Environment variables containing secrets (MONGODB_URI etc.) must be
+# added manually in the Render dashboard after initial deploy.
+#
+# Free-tier note:
+#   Render free tier spins down services after 15 min of inactivity.
+#   First request after spin-down may take ~30s (cold start).
+# -----------------------------------------------------------------------
+
+services:
+
+  # ── User Service ─────────────────────────────────────────────────────────
+  - type: web
+    name: lab07-user-service
+    runtime: docker
+    dockerfilePath: ./user-service/Dockerfile
+    dockerContext: ./user-service
+    plan: free
+    envVars:
+      - key: PORT
+        value: "3001"
+    # Internal DNS: lab07-user-service (Render auto-assigns internal URL)
+
+  # ── Product Service ───────────────────────────────────────────────────────
+  - type: web
+    name: lab07-product-service
+    runtime: docker
+    dockerfilePath: ./product-service/Dockerfile
+    dockerContext: ./product-service
+    plan: free
+    envVars:
+      - key: PORT
+        value: "3002"
+
+  # ── Order Service ─────────────────────────────────────────────────────────
+  - type: web
+    name: lab07-order-service
+    runtime: docker
+    dockerfilePath: ./order-service/Dockerfile
+    dockerContext: ./order-service
+    plan: free
+    envVars:
+      - key: PORT
+        value: "3003"
+      # These must be set to the Render internal URLs of the deployed services.
+      # Render assigns URLs in the format: https://<service-name>.onrender.com
+      # Update these after deploying user-service and product-service.
+      - key: USER_SERVICE_URL
+        value: https://lab07-user-service.onrender.com
+      - key: PRODUCT_SERVICE_URL
+        value: https://lab07-product-service.onrender.com
+
+  # ── API Gateway (PUBLIC) ──────────────────────────────────────────────────
+  - type: web
+    name: lab07-api-gateway
+    runtime: docker
+    dockerfilePath: ./api-gateway/Dockerfile
+    dockerContext: ./api-gateway
+    plan: free
+    envVars:
+      - key: PORT
+        value: "3000"
+      # Config-driven routing — set to deployed Render service URLs
+      - key: USER_SERVICE_URL
+        value: https://lab07-user-service.onrender.com
+      - key: PRODUCT_SERVICE_URL
+        value: https://lab07-product-service.onrender.com
+      - key: ORDER_SERVICE_URL
+        value: https://lab07-order-service.onrender.com

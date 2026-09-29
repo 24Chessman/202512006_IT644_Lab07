@@ -1,0 +1,32 @@
+# -----------------------------------------------------------------------
+# .dockerignore — product-service (Lab 06)
+# Prevents these paths from being sent to the Docker build context,
+# which speeds up builds and keeps secrets out of the image.
+# -----------------------------------------------------------------------
+
+# Node dependencies — reinstalled inside the image via npm install
+node_modules/
+npm-debug.log*
+
+# Environment secrets — injected at runtime via env vars or Compose
+.env
+.env.*
+
+# Version control metadata
+.git/
+.gitignore
+
+# Editor / IDE settings
+.vscode/
+.idea/
+
+# OS artefacts
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Test output / coverage
+coverage/

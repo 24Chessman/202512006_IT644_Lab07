@@ -1,0 +1,111 @@
+# -----------------------------------------------------------------------
+# compose.yaml — Lab 07: Microservices + API Gateway
+#
+# Architecture:
+#   Client/Postman → api-gateway (3000, public)
+#                    ├─ /users/*    → user-service    (3001, internal only)
+#                    ├─ /products/* → product-service (3002, internal only)
+#                    └─ /orders/*  → order-service   (3003, internal only)
+#
+# Only the gateway port is published to the host.
+# User/Product/Order services use `expose:` (container-to-container only).
+#
+# Run:    docker compose up -d
+# Stop:   docker compose down
+# Logs:   docker compose logs -f [service-name]
+# Status: docker compose ps
+#
+# Config-driven service discovery:
+#   All gateway upstream URLs come from environment variables.
+#   To change a service location, update only the env var here.
+# -----------------------------------------------------------------------
+
+services:
+
+  # ── API Gateway ──────────────────────────────────────────────────────────
+  # Single public entry point. All client traffic enters here.
+  # Routes /users → user-service, /products → product-service, /orders → order-service.
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    image: api-gateway:v1
+    container_name: api-gateway
+    restart: unless-stopped
+    ports:
+      - "4000:3000"             # ← ONLY published port; clients talk to the gateway on :4000
+    environment:
+      PORT: "3000"
+      # Config-driven routing table — change URL here, no code change needed
+      USER_SERVICE_URL:    "http://user-service:3001"
+      PRODUCT_SERVICE_URL: "http://product-service:3002"
+      ORDER_SERVICE_URL:   "http://order-service:3003"
+    depends_on:
+      - user-service
+      - product-service
+      - order-service
+    networks:
+      - campus-network
+
+  # ── User Service ─────────────────────────────────────────────────────────
+  # Internal only — no host port mapping; reachable only via the gateway.
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    image: user-service:v1
+    container_name: user-service
+    restart: unless-stopped
+    expose:
+      - "3001"                  # container-internal only; NOT published to host
+    environment:
+      PORT: "3001"
+    networks:
+      - campus-network
+
+  # ── Product Service ───────────────────────────────────────────────────────
+  # Internal only — no host port mapping; reachable only via the gateway.
+  product-service:
+    build:
+      context: ./product-service
+      dockerfile: Dockerfile
+    image: product-service:v1
+    container_name: product-service
+    restart: unless-stopped
+    expose:
+      - "3002"                  # container-internal only; NOT published to host
+    environment:
+      PORT: "3002"
+    networks:
+      - campus-network
+
+  # ── Order Service ─────────────────────────────────────────────────────────
+  # Internal only — no host port mapping; reachable only via the gateway.
+  # Depends on user-service and product-service for order validation.
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    image: order-service:v1
+    container_name: order-service
+    restart: unless-stopped
+    expose:
+      - "3003"                  # container-internal only; NOT published to host
+    environment:
+      PORT: "3003"
+      # Service-name DNS resolution — Docker resolves these on campus-network.
+      USER_SERVICE_URL:    "http://user-service:3001"
+      PRODUCT_SERVICE_URL: "http://product-service:3002"
+    depends_on:
+      - user-service
+      - product-service
+    networks:
+      - campus-network
+
+# ── Shared bridge network ─────────────────────────────────────────────────
+# All four services share this network. Docker provides automatic DNS
+# so each container is reachable by its service name (e.g. "user-service").
+# Clients outside Docker talk only to the gateway via published port 3000.
+networks:
+  campus-network:
+    driver: bridge
