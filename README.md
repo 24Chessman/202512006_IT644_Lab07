@@ -6,47 +6,45 @@ Lab 07 extends the three-microservice architecture from **Lab 06** by adding:
 
 1. **API Gateway** — a single public entry point that reverse-proxies all client traffic to the appropriate downstream service (`/users/*` → user-service, `/products/*` → product-service, `/orders/*` → order-service).
 2. **Config-driven service discovery** — gateway upstream URLs come exclusively from environment variables; no URL is hard-coded in routing logic.
-3. **Cloud deployment** — all four services deployed to [Render](https://render.com) with a public gateway URL.
+3. **Cloud deployment** — all four services deployed to [Render](https://render.com) with a public gateway URL reachable over the internet.
 
-> **Lab 06 is preserved untouched.** Lab 07 is a separate folder (`Lab07/`) that started as a copy of Lab 06 and added the gateway on top.
+> **Lab 06 is preserved untouched.** Lab 07 is a separate folder that started as a copy of Lab 06 and added the gateway layer on top.
+
+**GitHub:** https://github.com/24Chessman/202512006_IT644_Lab07
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    Docker campus-network                      │
-│                                                               │
-│  Client / Postman                                             │
-│       │                                                       │
-│       ▼  (port 4000 — only published port)                    │
-│  ┌─────────────┐                                              │
-│  │ api-gateway │  GET /health  →  gateway-local response      │
-│  │  :3000      │  ANY /users/* →  user-service:3001           │
-│  │             │  ANY /products/* → product-service:3002      │
-│  │             │  ANY /orders/* →  order-service:3003         │
-│  └──────┬──────┘                                              │
-│         │  (Docker bridge DNS, internal only)                 │
-│    ┌────┴───────────────────────┐                             │
-│    │                            │                             │
-│    ▼                            ▼                             │
-│  ┌──────────────┐  ┌──────────────────┐  ┌──────────────┐   │
-│  │ user-service │  │ product-service  │  │ order-service │   │
-│  │   :3001      │  │    :3002         │  │    :3003      │   │
-│  │  (expose)    │  │   (expose)       │  │   (expose)    │   │
-│  └──────────────┘  └──────────────────┘  └──────────────┘   │
-│         │                    │                    │           │
-│         └────────────────────┴────────────────────┘          │
-│                          in-memory store                       │
-│                   (MongoDB Atlas ready via env)               │
-└──────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                      Docker campus-network                       │
+│                                                                  │
+│  Client / Postman                                                │
+│       │                                                          │
+│       ▼  port 4000 (ONLY published port — local)                 │
+│  ┌──────────────┐                                                │
+│  │  api-gateway │  GET /health     → gateway (no proxy)         │
+│  │   :3000      │  ANY /users/*    → user-service:3001           │
+│  │              │  ANY /products/* → product-service:3002        │
+│  │              │  ANY /orders/*   → order-service:3003          │
+│  └──────┬───────┘                                                │
+│         │  Docker bridge DNS — internal only                     │
+│   ┌─────┴──────────────────────────┐                            │
+│   ▼                    ▼                         ▼               │
+│ ┌──────────────┐ ┌──────────────────┐ ┌──────────────────┐     │
+│ │ user-service │ │ product-service  │ │  order-service   │     │
+│ │   :3001      │ │    :3002         │ │     :3003        │     │
+│ │  (expose)    │ │   (expose)       │ │    (expose)      │     │
+│ └──────────────┘ └──────────────────┘ └──────────────────┘     │
+│      NOT reachable from host — gateway only                      │
+└─────────────────────────────────────────────────────────────────┘
 
-Cloud (Render):
-  https://lab07-api-gateway.onrender.com  ← public gateway
-        → https://lab07-user-service.onrender.com       (internal)
-        → https://lab07-product-service.onrender.com    (internal)
-        → https://lab07-order-service.onrender.com      (internal)
+Cloud (Render) — same topology, all HTTPS:
+  https://lab07-api-gateway.onrender.com        ← PUBLIC gateway
+        → https://lab07-user-service.onrender.com
+        → https://lab07-product-service.onrender.com
+        → https://lab07-order-service.onrender.com
 ```
 
 ---
@@ -56,13 +54,13 @@ Cloud (Render):
 | Concern | Direct client-to-service | With API Gateway |
 |---|---|---|
 | **Client complexity** | Client must know 3 URLs | Client needs only 1 URL |
-| **Internal topology exposure** | Service addresses/ports leaked | Internal addresses hidden |
-| **Request logging** | Must be duplicated in every service | Centralized in gateway |
-| **Error handling** | Each service handles network errors | Gateway normalizes 502/503 |
-| **Cross-cutting changes** | Change N services | Change 1 gateway |
-| **Firewall/network rules** | Expose N ports | Expose 1 port |
+| **Internal topology** | Service ports exposed to host | All internal — only gateway port published |
+| **Request logging** | Must be duplicated in every service | Single centralized log stream |
+| **Error handling** | Raw network errors reach client | Gateway normalizes 502/503 — always clean JSON |
+| **Cross-cutting changes** | Touch N services | Touch 1 gateway |
+| **Firewall rules** | Expose N ports | Expose 1 port |
 
-**Single entry point** simplifies clients, centralizes cross-cutting concerns (logging, error normalization, future auth), and hides the internal microservice topology completely.
+**Single entry point** simplifies clients, centralizes cross-cutting concerns (logging, error normalization, future auth/rate-limiting), and completely hides the internal microservice topology.
 
 ---
 
@@ -70,59 +68,52 @@ Cloud (Render):
 
 ```
 Lab07/
-├── api-gateway/          ← NEW: Express reverse-proxy gateway
-│   ├── server.js         ← Config-driven routing, logging, error handling
-│   ├── package.json
+├── api-gateway/              ← NEW: Express reverse-proxy gateway
+│   ├── server.js             ← Config-driven routing, logging, 502/503 handling
+│   ├── package.json          ← http-proxy-middleware dependency
 │   ├── Dockerfile
 │   └── .dockerignore
-├── user-service/         ← Unchanged from Lab 06
-├── product-service/      ← Unchanged from Lab 06
-├── order-service/        ← Unchanged from Lab 06
-├── compose.yaml          ← Updated: gateway added, services use expose:
-├── render.yaml           ← NEW: Render cloud deployment blueprint
-├── postman_collection.json ← Updated: gateway-routed + cloud + 503 tests
-└── README.md             ← This file
+├── user-service/             ← Unchanged from Lab 06
+├── product-service/          ← Unchanged from Lab 06
+├── order-service/            ← Unchanged from Lab 06
+├── compose.yaml              ← Updated: gateway added, services use expose:
+├── render.yaml               ← NEW: Render cloud deployment blueprint
+├── postman_collection.json   ← Updated: all 5 sections, env-variable driven
+├── postman_env_local.json    ← NEW: Postman environment for localhost:4000
+├── postman_env_cloud.json    ← NEW: Postman environment for Render cloud URL
+└── README.md                 ← This file
 ```
 
 ---
 
 ## Gateway Routing Table
 
-| Method | Gateway Path | Upstream Service | Target URL (env-driven) |
-|--------|-------------|-----------------|------------------------|
-| `GET` | `/health` | **gateway** (no proxy) | — |
-| `GET` | `/` | **gateway** (no proxy) | — |
+| Method | Gateway Path | Routed To | Env Variable |
+|--------|-------------|-----------|--------------|
+| `GET` | `/health` | Gateway (no proxy) | — |
+| `GET` | `/` | Gateway (no proxy) | — |
 | `ANY` | `/users/*` | user-service | `USER_SERVICE_URL` |
 | `ANY` | `/products/*` | product-service | `PRODUCT_SERVICE_URL` |
 | `ANY` | `/orders/*` | order-service | `ORDER_SERVICE_URL` |
 
-### User-service endpoints (via gateway)
+### Full endpoint list (via gateway)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/users` | List all users |
-| `POST` | `/users` | Create user |
-| `GET` | `/users/:id` | Get user by ID |
-| `PUT` | `/users/:id` | Update user |
-| `DELETE` | `/users/:id` | Delete user |
-
-### Product-service endpoints (via gateway)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/products` | List all products |
-| `POST` | `/products` | Create product |
-| `GET` | `/products/:id` | Get product by ID |
-| `PUT` | `/products/:id` | Update product |
-| `DELETE` | `/products/:id` | Delete product |
-
-### Order-service endpoints (via gateway)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/orders` | List all orders |
-| `POST` | `/orders` | Create order (validates user + product) |
-| `GET` | `/orders/:id` | Get order by ID |
+| Method | Path | Description | Status |
+|--------|------|-------------|--------|
+| `GET` | `/health` | Gateway health + upstream URLs | 200 |
+| `GET` | `/users` | List all users | 200 |
+| `POST` | `/users` | Create user | 201 |
+| `GET` | `/users/:id` | Get user by ID | 200 / 404 |
+| `PUT` | `/users/:id` | Update user | 200 / 404 |
+| `DELETE` | `/users/:id` | Delete user | 204 / 404 |
+| `GET` | `/products` | List all products | 200 |
+| `POST` | `/products` | Create product | 201 |
+| `GET` | `/products/:id` | Get product by ID | 200 / 404 |
+| `PUT` | `/products/:id` | Update product | 200 / 404 |
+| `DELETE` | `/products/:id` | Delete product | 204 / 404 |
+| `GET` | `/orders` | List all orders | 200 |
+| `POST` | `/orders` | Create order (validates user + product) | 201 / 404 / 503 |
+| `GET` | `/orders/:id` | Get order by ID | 200 / 404 |
 
 ---
 
@@ -130,17 +121,17 @@ Lab07/
 
 ### How it works
 
-The gateway reads three environment variables **at startup** and builds its entire routing table from them — no URL appears anywhere in the routing code:
+The gateway reads three environment variables **at startup** and builds its entire routing table from them. No URL appears anywhere in the routing logic itself:
 
 ```js
-// server.js — all URLs come from env, never hard-coded
+// api-gateway/server.js
 const SERVICE_URLS = {
   user:    (process.env.USER_SERVICE_URL    || 'http://user-service:3001').trim(),
   product: (process.env.PRODUCT_SERVICE_URL || 'http://product-service:3002').trim(),
   order:   (process.env.ORDER_SERVICE_URL   || 'http://order-service:3003').trim(),
 };
 
-// Route table built entirely from SERVICE_URLS
+// Route table built entirely from SERVICE_URLS — zero hard-coded URLs
 app.use('/users',    makeProxy(SERVICE_URLS.user,    '/users'));
 app.use('/products', makeProxy(SERVICE_URLS.product, '/products'));
 app.use('/orders',   makeProxy(SERVICE_URLS.order,   '/orders'));
@@ -148,18 +139,20 @@ app.use('/orders',   makeProxy(SERVICE_URLS.order,   '/orders'));
 
 ### Proof: config-only URL change
 
-To reroute `/users` from `user-service:3001` to a different host, **only the env var changes** — no code change, no rebuild:
+To reroute `/users` to a completely different host — **only the environment variable changes, no code touched, no rebuild needed**:
 
 **Local (`compose.yaml`):**
 ```yaml
 environment:
-  USER_SERVICE_URL: "http://user-service:3001"   # ← change only this
+  USER_SERVICE_URL: "http://user-service:3001"   # change only this line
 ```
 
-**Cloud (Render dashboard):**  
-`USER_SERVICE_URL` = `https://lab07-user-service.onrender.com` ← same mechanism
+**Cloud (Render dashboard):**
+```
+USER_SERVICE_URL = https://lab07-user-service.onrender.com
+```
 
-The gateway prints its routing table at startup so you can verify:
+The gateway prints its entire routing table at startup, confirming it reads from env:
 ```
 📡 Routing table (config-driven from environment):
    /users/*    → http://user-service:3001
@@ -167,19 +160,35 @@ The gateway prints its routing table at startup so you can verify:
    /orders/*   → http://order-service:3003
 ```
 
-### Comparison: static vs. dynamic service discovery
+The `/health` endpoint also exposes the live upstream URLs, so you can verify config without reading logs:
 
-| Feature | Static (this lab) | Dynamic (Consul/Eureka/k8s DNS) |
-|---------|------------------|--------------------------------|
-| **Configuration** | Env vars, manually updated | Auto-registered by services |
-| **URL changes** | Require redeploy/restart | Zero-downtime, real-time |
-| **Health-aware routing** | No — gateway doesn't check upstreams | Yes — unhealthy instances removed |
-| **Scaling** | Manual URL update needed | Auto-discovery of new instances |
-| **Complexity** | Low (good for labs/small systems) | High (needs Consul/etcd/k8s) |
-| **Failure visibility** | 503 on proxy error | Proactive: service removed before 503 |
+```json
+GET https://lab07-api-gateway.onrender.com/health
+{
+  "status": "ok",
+  "service": "api-gateway",
+  "version": "1.0.0",
+  "timestamp": "2026-09-29T04:42:44.425Z",
+  "upstreams": {
+    "user-service":    "https://lab07-user-service.onrender.com",
+    "product-service": "https://lab07-product-service.onrender.com",
+    "order-service":   "https://lab07-order-service.onrender.com"
+  }
+}
+```
 
-**What dynamic discovery adds:**  
-When order-service starts a second instance, it self-registers with Consul/Eureka. The gateway (or a service mesh like Envoy/Istio) queries the registry in real time and load-balances across both instances automatically — no env var change, no redeploy needed.
+### Static vs. dynamic service discovery
+
+| Feature | Static / config-based (this lab) | Dynamic (Consul / Eureka / k8s DNS) |
+|---------|----------------------------------|-------------------------------------|
+| **Configuration** | Env vars, set manually | Auto-registered by each service instance |
+| **URL changes** | Require env update + redeploy | Zero-downtime, instant |
+| **Health-aware routing** | No — gateway doesn't poll upstreams | Yes — unhealthy instances removed automatically |
+| **Horizontal scaling** | Manual URL update per new instance | Auto-discovery of new replicas |
+| **Complexity** | Very low — ideal for labs | High — needs Consul/etcd/k8s control plane |
+| **Failure visibility** | 503 on first failed request | Proactive: instance deregistered before 503 |
+
+**What dynamic discovery adds:** When order-service scales to 3 instances, each self-registers with Consul. The gateway (or a service mesh like Envoy/Istio) queries the registry in real time and load-balances across all three — no env var change, no redeploy. For this lab's scale, static config is the right trade-off.
 
 ---
 
@@ -187,59 +196,44 @@ When order-service starts a second instance, it self-registers with Consul/Eurek
 
 ### Prerequisites
 - Docker Desktop running
-- Port 4000 free
+- Port 4000 free on your machine
 
 ### Run
 
 ```bash
 cd Lab07
-docker compose up -d        # builds + starts all 4 services
-docker compose ps           # verify all 4 running
+docker compose up -d        # builds & starts all 4 containers
+docker compose ps           # verify status
 ```
 
-**Expected:**
+**Expected output:**
 ```
-NAME              PORTS
-api-gateway       0.0.0.0:4000->3000/tcp   ← only published port
-order-service     3003/tcp                 ← internal only
-product-service   3002/tcp                 ← internal only
-user-service      3001/tcp                 ← internal only
-```
-
-### Quick local test
-
-```bash
-# Health check
-curl http://localhost:4000/health
-
-# Create user
-curl -X POST http://localhost:4000/users \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Alice","email":"alice@example.com"}'
-
-# Create product
-curl -X POST http://localhost:4000/products \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Laptop","price":999.99,"category":"Electronics"}'
-
-# Create order (use ids from above)
-curl -X POST http://localhost:4000/orders \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"u1","productId":"p1","quantity":2}'
+NAME              IMAGE                PORTS
+api-gateway       api-gateway:v1       0.0.0.0:4000->3000/tcp  ← only published port
+order-service     order-service:v1     3003/tcp                 ← internal only
+product-service   product-service:v1   3002/tcp                 ← internal only
+user-service      user-service:v1      3001/tcp                 ← internal only
 ```
 
-### Local test results (verified)
+### Local test results (verified 2026-09-29)
 
 ```
-GET  /health        → 200 { status: "ok", service: "api-gateway", upstreams: {...} }
-GET  /users         → 200 []
-POST /users         → 201 { id: "u1", name: "Alice Johnson", email: "alice@example.com", ... }
-GET  /users/u1      → 200 { id: "u1", name: "Alice Johnson", ... }
-POST /products      → 201 { id: "p1", name: "Laptop Pro 15", price: 1299.99, ... }
-POST /orders        → 201 { id: "o1", ..., totalPrice: 2599.98, status: "confirmed" }
+GET  /health        → 200  {"status":"ok","service":"api-gateway","upstreams":{...}}
+GET  /users         → 200  []
+POST /users         → 201  {"id":"u1","name":"Alice Johnson","email":"alice@example.com",...}
+GET  /users/u1      → 200  {"id":"u1","name":"Alice Johnson",...}
+PUT  /users/u1      → 200  {"name":"Alice Johnson (Updated)",...}
+DELETE /users/u1    → 204
+POST /products      → 201  {"id":"p1","name":"Laptop Pro 15","price":1299.99,...}
+PUT  /products/p1   → 200  {"price":999,...}
+DELETE /products/p1 → 204
+POST /orders        → 201  {"id":"o1","totalPrice":2599.98,"status":"confirmed",...}
+GET  /orders/o1     → 200  {"id":"o1",...}
 ```
 
-### Gateway request log (from `docker compose logs api-gateway`)
+### Gateway request log
+
+Every proxied request is logged — method, original path, target service, status, duration:
 
 ```
 [2026-09-29T04:07:11.770Z] GET /health → gateway | 200 (8ms)
@@ -250,16 +244,25 @@ POST /orders        → 201 { id: "o1", ..., totalPrice: 2599.98, status: "confi
 [2026-09-29T04:07:12.094Z] POST /orders → order-service | 201 (76ms)
 ```
 
-### 503 Unreachable-service test
+### 503 unreachable-service test
 
 ```bash
+# Stop user-service to simulate outage
 docker stop user-service
-curl http://localhost:4000/users
-# → 503 {"error":"ServiceUnavailable","message":"Upstream service at http://user-service:3001 is unavailable..."}
 
+# Gateway returns structured 503 — never hangs or crashes
+curl http://localhost:4000/users
+# → 503 {
+#     "error": "ServiceUnavailable",
+#     "message": "Upstream service at http://user-service:3001 is unavailable...",
+#     "upstream": "http://user-service:3001",
+#     "path": "/users/"
+#   }
+
+# Restart — gateway recovers with zero changes
 docker start user-service
 curl http://localhost:4000/users
-# → 200 [] (immediate recovery, no gateway restart needed)
+# → 200 []
 ```
 
 **Gateway log during outage:**
@@ -272,43 +275,43 @@ curl http://localhost:4000/users
 
 ## Cloud Deployment (Render)
 
-### Platform chosen: [Render](https://render.com)
+### Platform: [Render](https://render.com)
 
 **Why Render:**
-- Free tier supports Docker web services
-- Auto-detects `render.yaml` blueprint for multi-service deploys
-- Each service gets its own `*.onrender.com` URL
-- Environment variables set per-service in the dashboard (same config-driven approach)
+- Free tier supports Docker web services with no credit card
+- `render.yaml` Blueprint auto-creates all 4 services from one file
+- Each service gets a `*.onrender.com` HTTPS URL
+- Environment variables set per-service in the dashboard — same config-driven approach as local
 
-### Free-tier limitations
+### Public gateway URL
 
-| Limitation | Impact |
-|-----------|--------|
-| Services spin down after 15 min inactivity | First request ~30s cold start |
-| In-memory store resets on each cold start | Data not persisted (acceptable for labs) |
-| 512 MB RAM per service | Sufficient for 3 microservices + gateway |
-| No guaranteed uptime | Suitable for demo/lab only |
+```
+https://lab07-api-gateway.onrender.com
+```
 
-**What was deployed:** all 4 services (api-gateway + user-service + product-service + order-service).
+**Verified endpoints (tested 2026-09-29):**
+
+```
+GET  https://lab07-api-gateway.onrender.com/health   → 200
+GET  https://lab07-api-gateway.onrender.com/users    → 200 []
+POST https://lab07-api-gateway.onrender.com/users    → 201 {"id":"u1",...}
+POST https://lab07-api-gateway.onrender.com/products → 201 {"id":"p1",...}
+POST https://lab07-api-gateway.onrender.com/orders   → 201 {"id":"o1","totalPrice":799.99,"status":"confirmed",...}
+```
 
 ### Deployment steps
 
-1. **Push Lab07 to GitHub** (create a new public/private repo):
+1. **Push repo to GitHub**
    ```bash
-   cd Lab07
-   git init
-   git add .
-   git commit -m "Lab 07: API Gateway + cloud deployment"
-   git remote add origin https://github.com/<you>/lab07-microservices.git
-   git push -u origin main
+   git push origin main
    ```
 
-2. **Create Render services** (via Blueprint or manually):
-   - Go to [dashboard.render.com](https://dashboard.render.com) → **New → Blueprint**
-   - Select the GitHub repo → Render reads `render.yaml` → creates all 4 services
-   - OR manually: New → Web Service → Docker → link repo → set `dockerfilePath` and `dockerContext` for each
+2. **Create Render Blueprint**
+   - [dashboard.render.com](https://dashboard.render.com) → New → Blueprint
+   - Connect `24Chessman/202512006_IT644_Lab07` repo
+   - Blueprint Name: `lab07-microservices` → Apply
 
-3. **Set environment variables** in Render dashboard per service:
+3. **Set environment variables** in Render dashboard (after services deploy):
 
    | Service | Variable | Value |
    |---------|----------|-------|
@@ -318,52 +321,50 @@ curl http://localhost:4000/users
    | `lab07-api-gateway` | `PRODUCT_SERVICE_URL` | `https://lab07-product-service.onrender.com` |
    | `lab07-api-gateway` | `ORDER_SERVICE_URL` | `https://lab07-order-service.onrender.com` |
 
-4. **Verify:**
-   ```
-   https://lab07-api-gateway.onrender.com/health
-   ```
+4. **Verify** — `https://lab07-api-gateway.onrender.com/health` returns `{"status":"ok",...}`
 
-### Public gateway URL
+### Free-tier limitations
 
-```
-https://lab07-api-gateway.onrender.com
-```
-
-> **Note:** The URL format above follows Render's naming convention. The exact subdomain is confirmed in the Render dashboard after deployment.
+| Limitation | Impact |
+|-----------|--------|
+| Services spin down after 15 min inactivity | First request ~30s cold start |
+| In-memory store resets on cold start | Data not persisted (acceptable for demo/lab) |
+| 512 MB RAM per service | Sufficient for all 3 microservices + gateway |
+| No SLA / guaranteed uptime | Lab/demo use only |
 
 ---
 
 ## Postman Collection
 
-**File:** `postman_collection.json`
+**Files:**
+- `postman_collection.json` — all 5 test sections
+- `postman_env_local.json` — environment: `gateway_url = http://localhost:4000`
+- `postman_env_cloud.json` — environment: `gateway_url = https://lab07-api-gateway.onrender.com`
 
-### Sections
+### How to switch between local and cloud
 
-| Section | Tests |
-|---------|-------|
-| `1 · Gateway Health & Info` | `/health`, `/` |
-| `2 · User Service — via Gateway` | Full CRUD via `/users/*` |
-| `3 · Product Service — via Gateway` | Full CRUD via `/products/*` |
-| `4 · Order Service — via Gateway` | Create + get orders via `/orders/*` |
-| `5 · Gateway Error Scenarios` | 404 invalid IDs, **503 service-down**, recovery |
-| `6 · Cloud Gateway Tests (Render)` | Same tests via `cloud_url` variable |
+1. In Postman → **Import** → import all three files
+2. Top-right dropdown → select **"Lab07 — Local (Docker)"** or **"Lab07 — Cloud (Render)"**
+3. Run the same collection — `{{gateway_url}}` resolves automatically
 
-### Variables
+### Test sections
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `gateway_url` | `http://localhost:4000` | Switch to cloud URL for cloud tests |
-| `cloud_url` | `https://lab07-api-gateway.onrender.com` | Cloud endpoint |
-| `userId` | auto-set | Set by POST /users test |
-| `productId` | auto-set | Set by POST /products test |
-| `orderId` | auto-set | Set by POST /orders test |
+| Section | Tests | What it covers |
+|---------|-------|----------------|
+| `1 · Gateway Health & Info` | 2 | `/health` (upstream URLs from env), `/` routing table |
+| `2 · User Service — via Gateway` | 7 | Full CRUD via `/users/*` |
+| `3 · Product Service — via Gateway` | 7 | Full CRUD via `/products/*` |
+| `4 · Order Service — via Gateway` | 3 | Full 3-service chain via `/orders/*` |
+| `5 · Gateway Error Scenarios` | 5 | 404 invalid IDs, **503 service-down**, recovery, unknown route |
 
 ### 503 test procedure
 
-1. `docker stop user-service`
-2. Run **"GET /users — 503 user-service DOWN"** → expect `503 ServiceUnavailable`
-3. `docker start user-service`
-4. Run **"GET /users — Recovery after restart"** → expect `200 []`
+```
+1. docker stop user-service
+2. Postman → "GET /users — 503 user-service DOWN"   → expect 503
+3. docker start user-service
+4. Postman → "GET /users — Recovery after restart"  → expect 200
+```
 
 ---
 
@@ -371,30 +372,30 @@ https://lab07-api-gateway.onrender.com
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Port 4000 refused | Docker not running or container crashed | `docker compose up -d` |
-| `503 ServiceUnavailable` on all routes | Gateway started before services ready | `docker compose restart api-gateway` |
-| POST returns `400 Bad Request` | Missing required fields (name, email, etc.) | Check request body |
-| Order returns `404 NotFound` for userId | userId doesn't exist in user-service | Create user first |
-| Gateway returns `404 NotFound` for `/api/users` | Gateway prefix is `/users` not `/api/users` | Use correct prefix |
-| Render cold start timeout | Free tier spin-down | Retry after 30s |
-| `EAI_AGAIN` in gateway logs | Container stopped or DNS not ready | `docker start <service-name>` |
+| `curl: Connection refused` on port 4000 | Docker not running or gateway crashed | `docker compose up -d` |
+| Gateway shows `503` for all routes on startup | Services haven't started yet | `docker compose restart api-gateway` after 5s |
+| POST returns `400` missing fields | Required body fields not sent | Check request body (name, email / name, price, category) |
+| Order returns `404` for userId | User deleted or service restarted (in-memory) | Re-create user first |
+| Render cold start timeout in Postman | Free tier spin-down | Retry after 30s |
+| `EAI_AGAIN` in gateway logs | Target container stopped / DNS gone | `docker start <service-name>` |
+| `GatewayInternalError` on POST | Express body parsed before proxy (old bug) | Fixed: `express.json()` removed from gateway |
 
 ---
 
 ## Reflection
 
-Compared to Lab 06, adding the API gateway fundamentally changes how the system is **operated and consumed**:
+Compared to Lab 06, adding the API gateway and cloud deployment fundamentally changed how the system is **used and operated**:
 
-1. **Operational simplicity for clients** — Postman (and any real client) now configures a single URL (`localhost:4000` or the Render cloud URL) instead of three. Swapping environments means changing one variable, not three.
+1. **One URL to rule them all** — Postman (and any real client) configures a single endpoint — `localhost:4000` locally or the Render URL in the cloud. Switching from local to cloud means changing one environment variable, not three.
 
-2. **True internal isolation** — the three microservices no longer expose host ports (`ports:` → `expose:`). From the host, only port 4000 is reachable; user/product/order services are invisible to anyone outside the Docker network.
+2. **True internal isolation** — the three microservices no longer publish host ports (`ports:` → `expose:`). From outside Docker, only port 4000 is reachable; user/product/order services are invisible to anyone not on the campus-network bridge.
 
-3. **Centralized visibility** — the gateway log shows every request across all services in one stream: method, path, target, status, duration. In Lab 06, you had to tail three separate logs.
+3. **Centralized observability** — the gateway log shows every request across all services in one stream: `[timestamp] METHOD /path → service | status (ms)`. In Lab 06, you had to tail three separate containers to see the full picture.
 
-4. **Graceful degradation** — when user-service went down in Lab 06, the order-service returned a raw network error. Now the gateway catches `EAI_AGAIN`/`ECONNREFUSED` and returns a clean, structured `503 ServiceUnavailable` — the client always gets a meaningful JSON response.
+4. **Graceful degradation** — when user-service goes down, the gateway catches `EAI_AGAIN` / `ECONNREFUSED` and returns a structured `503 ServiceUnavailable` within 5 seconds. The client always gets a meaningful JSON response — no hanging connection, no raw Node.js stack trace.
 
-5. **Cloud as first-class deployment** — config-driven routing means the same `server.js` runs locally (talking to Docker service names) and in Render (talking to `*.onrender.com` URLs) without any code change — only the env vars differ.
+5. **Same code, two environments** — the exact same `server.js` runs locally (Docker DNS service names) and on Render (HTTPS Render URLs) with zero code changes. Only the env vars differ, proving the config-driven approach works across deployment targets.
 
-6. **Foundation for future cross-cutting concerns** — rate limiting, auth middleware, request ID propagation, and canary routing can all be added in one place (the gateway) rather than replicated across every service.
+6. **Cloud as first-class citizen** — deploying to Render exposed one real-world trade-off: Render free-tier services cold-start after 15 minutes of inactivity. The first request wakes all four services simultaneously, which can cascade delays. This would be solved in production with health-check pings, persistent compute, or a service mesh.
 
-7. **The cost of the gateway** — one extra network hop per request and one additional service to operate. For this lab's scale that's negligible, but in production this trade-off drives decisions around service mesh vs. API gateway vs. client-side load balancing.
+7. **Foundation for future cross-cutting concerns** — rate limiting, JWT auth, request-ID propagation, and A/B routing can now all be added in one place (the gateway) rather than replicated across every service — the key architectural benefit of this pattern.
