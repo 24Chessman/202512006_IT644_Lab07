@@ -1,0 +1,32 @@
+{
+  "id": "lab07-env-local",
+  "name": "Lab07 — Local (Docker)",
+  "values": [
+    {
+      "key": "gateway_url",
+      "value": "http://localhost:4000",
+      "enabled": true,
+      "description": "API Gateway published port on local Docker"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "enabled": true,
+      "description": "Auto-set by POST /users test script"
+    },
+    {
+      "key": "productId",
+      "value": "",
+      "enabled": true,
+      "description": "Auto-set by POST /products test script"
+    },
+    {
+      "key": "orderId",
+      "value": "",
+      "enabled": true,
+      "description": "Auto-set by POST /orders test script"
+    }
+  ],
+  "_postman_variable_scope": "environment",
+  "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+}

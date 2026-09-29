@@ -1,0 +1,32 @@
+{
+  "id": "lab07-env-cloud",
+  "name": "Lab07 — Cloud (Render)",
+  "values": [
+    {
+      "key": "gateway_url",
+      "value": "https://lab07-api-gateway.onrender.com",
+      "enabled": true,
+      "description": "Public Render cloud gateway URL"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "enabled": true,
+      "description": "Auto-set by POST /users test script"
+    },
+    {
+      "key": "productId",
+      "value": "",
+      "enabled": true,
+      "description": "Auto-set by POST /products test script"
+    },
+    {
+      "key": "orderId",
+      "value": "",
+      "enabled": true,
+      "description": "Auto-set by POST /orders test script"
+    }
+  ],
+  "_postman_variable_scope": "environment",
+  "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+}
